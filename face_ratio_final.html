@@ -1,0 +1,80 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>📏 얼굴 황금비율 분석기</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      text-align: center;
+      background-color: #eaf6ff;
+    }
+    video, canvas {
+      border-radius: 20px;
+      margin-top: 20px;
+    }
+    #message {
+      margin-top: 20px;
+      font-size: 1.2rem;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>📏 얼굴 황금비율 분석기</h1>
+  <video id="video" width="640" height="480" autoplay muted></video>
+  <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
+  <div id="message">잠시만 기다려 주세요...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
+
+  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const message = document.getElementById("message");
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false,
+      });
+      video.srcObject = stream;
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          resolve(video);
+        };
+      });
+    }
+
+    async function detectFace() {
+      const model = await blazeface.load();
+      setInterval(async () => {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const predictions = await model.estimateFaces(canvas, false);
+
+        if (predictions.length > 0) {
+          // 얼굴이 감지된 경우
+          const face = predictions[0];
+          const width = face.bottomRight[0] - face.topLeft[0];
+          const height = face.bottomRight[1] - face.topLeft[1];
+          const ratio = width / height;
+          const score = Math.max(0, Math.min(100, (1 - Math.abs(ratio - 0.618)) * 100));
+          message.innerText = `황금비율 유사도: ${score.toFixed(1)}%`;
+        } else {
+          message.innerText = "당신은 사람이기에 아름답습니다 :)";
+        }
+      }, 1000);
+    }
+
+    setupCamera().then(() => {
+      video.play();
+      detectFace();
+    });
+  </script>
+</body>
+</html>
