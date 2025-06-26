@@ -1,0 +1,111 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>📏 얼굴 황금비율 분석기</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      text-align: center;
+      background-color: #e6f2ff;
+      padding-top: 30px;
+    }
+    h1 {
+      font-size: 2em;
+    }
+    video, canvas {
+      border-radius: 20px;
+      margin-top: 20px;
+    }
+    #result {
+      font-size: 1.2em;
+      margin-top: 15px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 1em;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>📏 얼굴 황금비율 분석기</h1>
+  <video id="video" width="640" height="480" autoplay playsinline></video>
+  <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+  <div id="result">잠시만 기다려 주세요...</div>
+  <button onclick="analyze()">다시 분석하기</button>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const result = document.getElementById('result');
+    const ctx = canvas.getContext('2d');
+
+    let faceDetector;
+    try {
+      faceDetector = new FaceDetector();
+    } catch (e) {
+      result.textContent = '⚠️ 브라우저가 FaceDetector API를 지원하지 않습니다.';
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then((stream) => {
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          analyze();
+        };
+      })
+      .catch((err) => {
+        result.textContent = '📷 카메라 접근 권한이 필요합니다.';
+      });
+
+    function analyze() {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageBitmap = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      if (!faceDetector) {
+        result.textContent = 'FaceDetector API를 사용할 수 없습니다.';
+        return;
+      }
+
+      faceDetector.detect(canvas).then((faces) => {
+        if (faces.length > 0) {
+          result.textContent = '당신은 사람이기에 아름답습니다 :)';
+        } else {
+          const darkThreshold = 100;
+          let minX = 640, minY = 480, maxX = 0, maxY = 0;
+          for (let y = 0; y < 480; y++) {
+            for (let x = 0; x < 640; x++) {
+              const i = (y * 640 + x) * 4;
+              const r = imageBitmap.data[i];
+              const g = imageBitmap.data[i + 1];
+              const b = imageBitmap.data[i + 2];
+              const brightness = (r + g + b) / 3;
+              if (brightness < darkThreshold) {
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+          const width = maxX - minX;
+          const height = maxY - minY;
+
+          if (width < 50 || height < 50) {
+            result.textContent = '사물이 감지되지 않았어요!';
+            return;
+          }
+
+          const ratio = width / height;
+          const goldenRatio = 1.618;
+          const similarity = Math.min(100, (1 - Math.abs(ratio - goldenRatio) / goldenRatio) * 100);
+          result.textContent = `황금비율 유사도: ${similarity.toFixed(1)}%`;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
