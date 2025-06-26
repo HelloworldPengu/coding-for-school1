@@ -1,0 +1,108 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>얼굴 황금비율 분석기</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      text-align: center;
+      background-color: #f0f8ff;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      margin-top: 40px;
+      color: #2c3e50;
+    }
+    video, canvas {
+      margin-top: 20px;
+      border-radius: 12px;
+    }
+    #message {
+      font-size: 18px;
+      margin-top: 20px;
+      color: #34495e;
+    }
+  </style>
+</head>
+<body>
+  <h1>📏 얼굴 황금비율 분석기</h1>
+  <video id="video" width="640" height="480" autoplay muted></video>
+  <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+  <div id="message">잠시만 기다려 주세요...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const message = document.getElementById('message');
+    const ctx = canvas.getContext('2d');
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          resolve(video);
+        };
+      });
+    }
+
+    async function loadModel() {
+      return await faceLandmarksDetection.load(
+        faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
+      );
+    }
+
+    function calculateRatio(landmarks) {
+      const leftEye = landmarks[33];
+      const rightEye = landmarks[263];
+      const chin = landmarks[152];
+      const forehead = landmarks[10];
+
+      const eyeDist = Math.hypot(leftEye.x - rightEye.x, leftEye.y - rightEye.y);
+      const faceHeight = Math.abs(chin.y - forehead.y);
+      if (faceHeight === 0) return 0;
+
+      const ratio = eyeDist / faceHeight;
+      const golden = 0.618;
+      const score = Math.max(0, Math.min(100, (1 - Math.abs(ratio - golden)) * 100));
+      return score.toFixed(1);
+    }
+
+    async function main() {
+      await setupCamera();
+      video.play();
+      const model = await loadModel();
+
+      async function detectFace() {
+        const predictions = await model.estimateFaces({ input: video });
+
+        if (predictions.length > 0) {
+          const score = calculateRatio(predictions[0].scaledMesh);
+          message.innerText = `황금비율 유사도: ${score}%
+당신은 있는 그대로 아름답습니다 :)`;
+        } else {
+          message.innerText = "얼굴이 인식되지 않았어요. 카메라를 바라봐 주세요!";
+        }
+
+        requestAnimationFrame(detectFace);
+      }
+
+      detectFace();
+    }
+
+    main();
+  </script>
+</body>
+</html>
