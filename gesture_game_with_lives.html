@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>제스처 인식 체험</title>
+  <style>
+    body {
+      text-align: center;
+      font-family: Arial, sans-serif;
+      background-color: #f0f8ff;
+    }
+    video {
+      border: 2px solid #333;
+      border-radius: 10px;
+    }
+    #message {
+      font-size: 28px;
+      margin-top: 30px;
+      color: green;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>📸 제스처 인식 체험</h1>
+  <video id="video" width="640" height="480" autoplay></video>
+  <div id="message"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.9.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const message = document.getElementById('message');
+    let gesturesUsed = new Set();
+    const targetNumber = Math.floor(Math.random() * 6) + 1;
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+      });
+
+    const hands = new Hands({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
+    });
+
+    function updateMessage(score) {
+      if (score === targetNumber) {
+        message.innerText = "🎉 맞습니다! 성공!";
+        video.remove();
+      } else {
+        message.innerText = "❌ 아닙니다!";
+      }
+    }
+
+    function countFingers(landmarks) {
+      const tips = [8, 12, 16, 20];
+      let count = 0;
+      for (let i = 0; i < tips.length; i++) {
+        if (landmarks[tips[i]].y < landmarks[tips[i] - 2].y) count++;
+      }
+      if (landmarks[4].x > landmarks[3].x) count++;
+      return count;
+    }
+
+    hands.onResults(results => {
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+
+      const landmarks = results.multiHandLandmarks[0];
+      const fingers = countFingers(landmarks);
+      const gesture = `NUM_${fingers}`;
+
+      if (!gesture || gesturesUsed.has(gesture)) return;
+      gesturesUsed.add(gesture);
+
+      updateMessage(fingers);
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d');
+
+    async function detectHands() {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      await hands.send({ image: canvas });
+      requestAnimationFrame(detectHands);
+    }
+
+    video.onloadeddata = () => detectHands();
+  </script>
+</body>
+</html>
