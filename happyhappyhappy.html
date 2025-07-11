@@ -2,7 +2,9 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>벽돌깨기 게임</title>
+  <!-- 1. 반응형 뷰포트 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>벽돌깨기 게임 (모바일 지원)</title>
   <style>
     body {
       margin: 0; padding: 0;
@@ -12,12 +14,18 @@
       align-items: center; justify-content: center;
       overflow: hidden;
     }
+
+    /* 2. 캔버스를 화면에 맞춰 유연하게 */
     canvas {
       background: #fefefe;
       border: 4px solid #333;
       border-radius: 8px;
       box-shadow: 0 0 20px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 800px;
+      height: auto;
     }
+
     #overlay {
       position: absolute; top: 0; left: 0;
       width: 100vw; height: 100vh;
@@ -35,35 +43,33 @@
 <body>
   <div id="overlay">
     <h1>벽돌깨기</h1>
-    <p>Press SPACE or Click to Start</p>
+    <p>Press SPACE / Tap to Start</p>
   </div>
   <canvas id="gameCanvas" width="800" height="450"></canvas>
 
   <script>
-    const canvas       = document.getElementById("gameCanvas");
-    const ctx          = canvas.getContext("2d");
-    const overlay      = document.getElementById("overlay");
+    const canvas  = document.getElementById("gameCanvas");
+    const ctx     = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
 
-    // --- 설정 ---
+    // ---- 기본 설정 ----
     const maxLevel     = 50;
     const ballRadius   = 8;
     const paddleHeight = 10;
-    const basePaddleW  = 180;   // 120 → 180 (1.5배)
+    const basePaddleW  = 180;
     const paddleShrink = 5;
     const minPaddleW   = 40;
     const padSpeed     = 9;
-
-    const brickRows    = 4;    // 세로 4줄 고정
+    const brickRows    = 4;
     const brickW       = 45;
     const brickH       = 15;
     const brickPad     = 5;
     const brickOffsetY = 40;
+    const initialSpeed = 2;
+    const speedFactor  = 1.2;
+    const maxSpeed     = 8;
 
-    const initialSpeed = 2;      // 초기 속도
-    const speedFactor  = 1.2;    // 충돌 시 1.2배
-    const maxSpeed     = 8;      // 최대 속도 한계
-
-    // --- 상태 변수 ---
+    // ---- 상태 변수 ----
     let level       = 1;
     let paddleW     = basePaddleW;
     let x           = canvas.width/2;
@@ -79,7 +85,7 @@
     let lives       = 3;
     let started     = false;
 
-    // --- 입력 이벤트 ---
+    // ---- 입력 이벤트 ----
     document.addEventListener("keydown", e => {
       if (!started && e.key === " ") startGame();
       if (e.key === "ArrowRight") rightP = true;
@@ -89,19 +95,38 @@
       if (e.key === "ArrowRight") rightP = false;
       if (e.key === "ArrowLeft")  leftP  = false;
     });
+
+    // 마우스 이동
     document.addEventListener("mousemove", e => {
-      const mx = e.clientX - canvas.offsetLeft;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
       if (mx >= 0 && mx <= canvas.width) {
         paddleX = mx - paddleW/2;
       }
     });
+
+    // 3. 터치 이동
+    canvas.addEventListener("touchmove", e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const touch = e.touches[0];
+      let mx = touch.clientX - rect.left;
+      if (mx < 0) mx = 0;
+      if (mx > canvas.width) mx = canvas.width;
+      paddleX = mx - paddleW/2;
+    }, { passive: false });
+
+    // 시작 터치
+    canvas.addEventListener("touchstart", () => {
+      if (!started) startGame();
+    });
+
     overlay.addEventListener("click", startGame);
 
-    // --- 벽돌 초기화 ---
+    // ---- 벽돌 초기화 ----
     function initBricks() {
       brickCols = Math.floor((canvas.width + brickPad) / (brickW + brickPad));
       brickOffX = (canvas.width - (brickCols*brickW + (brickCols-1)*brickPad)) / 2;
-
       totalBricks = brickRows * brickCols;
       score = 0;
       bricks = [];
@@ -115,7 +140,7 @@
       resetPositions();
     }
 
-    // --- 충돌 검사 & 속도 증가 (상한선 적용) ---
+    // ---- 충돌 검사 & 속도 증가 ----
     function collisionDetection() {
       const nx = x + dx, ny = y + dy;
       for (let r = 0; r < brickRows; r++) {
@@ -141,7 +166,7 @@
       }
     }
 
-    // --- 레벨업 처리 ---
+    // ---- 레벨업 & 리셋 ----
     function levelUp() {
       if (level < maxLevel) {
         level++;
@@ -152,17 +177,13 @@
         document.location.reload();
       }
     }
-
-    // --- 위치 및 속도 리셋 ---
     function resetPositions() {
-      x = canvas.width/2;
-      y = canvas.height - 50;
+      x = canvas.width/2; y = canvas.height - 50;
       paddleX = (canvas.width - paddleW)/2;
-      dx = initialSpeed;
-      dy = -initialSpeed;
+      dx = initialSpeed; dy = -initialSpeed;
     }
 
-    // --- 그리기 ---
+    // ---- 그리기 함수 ----
     function drawBall() {
       ctx.beginPath();
       ctx.arc(x,y,ballRadius,0,Math.PI*2);
@@ -195,11 +216,10 @@
       ctx.fillText(`Lives: ${lives}`, 240,20);
     }
 
-    // --- 메인 루프 ---
+    // ---- 메인 루프 ----
     function draw() {
       if (!started) return;
       ctx.clearRect(0,0,canvas.width,canvas.height);
-
       drawBricks(); drawBall(); drawPaddle(); drawInfo(); collisionDetection();
 
       if (x+dx < ballRadius || x+dx > canvas.width-ballRadius) dx = -dx;
@@ -221,7 +241,7 @@
       requestAnimationFrame(draw);
     }
 
-    // --- 게임 시작 ---
+    // ---- 게임 시작 ----
     function startGame() {
       started = true;
       overlay.style.display = "none";
