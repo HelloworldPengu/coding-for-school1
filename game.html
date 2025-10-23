@@ -97,7 +97,7 @@
 
     const player = { x: 28, y: H()/2 - PADDLE_H/2, vy: 0, score: 0 };
     const ai = { x: W()-28-PADDLE_W, y: H()/2 - PADDLE_H/2, vy: 0, score: 0, error: 0 };
-    const ball = { x: W()/2, y: H()/2, vx: 0, vy: 0, speed: 380, trail: [] };
+    const ball = { x: W()/2, y: H()/2, vx: 0, vy: 0, speed: 400, trail: [] };
 
     let keys = new Set();
     let mouseY = null; let touchId = null;
@@ -415,3 +415,4 @@
   </script>
 </body>
 </html>
+
