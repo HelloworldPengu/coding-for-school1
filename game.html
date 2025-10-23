@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Ping Pong</title>
+  <style>
+    :root{
+      --bg:#0b1020; --fg:#eaf2ff; --primary:#7aa2ff; --accent:#70f7c6; --muted:#98a0b3;
+      --danger:#ff6b6b; --shadow:0 20px 60px rgba(0,0,0,.35);
+    }
+    html,body{height:100%;margin:0;background:radial-gradient(1200px 600px at 60% -10%, #1c264b 0%, var(--bg) 55%) fixed;color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,Helvetica,Arial,sans-serif}
+    .wrap{display:grid;place-items:center;height:100%;gap:14px}
+    .card{width:min(100vw-24px,960px);box-shadow:var(--shadow);border-radius:20px;background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));backdrop-filter: blur(6px);border:1px solid rgba(255,255,255,.07)}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px 8px}
+    header h1{font-size:clamp(18px,3.6vw,28px);margin:0;font-weight:800;letter-spacing:.2px}
+    header .btns{display:flex;gap:8px;flex-wrap:wrap}
+    button{appearance:none;border:0;border-radius:14px;padding:10px 14px;font-weight:700;cursor:pointer;transition:transform .08s ease, box-shadow .2s ease, opacity .2s}
+    button.primary{background:linear-gradient(180deg, var(--primary), #4a7dff);color:white;box-shadow:0 8px 24px rgba(122,162,255,.35)}
+    button.ghost{background:rgba(255,255,255,.06);color:var(--fg);border:1px solid rgba(255,255,255,.08)}
+    button:active{transform:translateY(1px)}
+    .bar{display:flex;align-items:center;gap:10px;padding:0 18px 14px;color:var(--muted);font-size:14px}
+    .bar .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+    canvas{width:100%;height:auto;display:block;border-radius:18px}
+    .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-weight:700;font-size:12px; padding:4px 7px;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+    .pill{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:12px}
+    .meter{height:10px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden}
+    .meter > i{display:block;height:100%;background:linear-gradient(90deg, var(--accent), #8ef);width:40%}
+    footer{opacity:.75;font-size:12px;text-align:center;padding-bottom:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <h1>🤖 AI Ping Pong</h1>
+        <div class="btns">
+          <button id="startBtn" class="primary">게임 시작 (Space)</button>
+          <button id="pauseBtn" class="ghost">일시정지 (P)</button>
+          <button id="resetBtn" class="ghost">리셋 (R)</button>
+        </div>
+      </header>
+      <div class="bar">
+        <div class="row" style="gap:10px">
+          <span class="pill">조작: <span class="kbd">W/S</span> 또는 <span class="kbd">↑/↓</span> · 마우스/터치도 가능</span>
+          <span class="pill">목표: 11점 선취 (2점차)</span>
+          <span class="pill">스핀 & 파티클 이펙트 ON</span>
+        </div>
+      </div>
+      <canvas id="game" width="960" height="560" aria-label="AI Ping Pong"></canvas>
+      <div class="bar" style="justify-content:space-between">
+        <div class="row">
+          <span>난이도</span>
+          <input id="difficulty" type="range" min="0" max="100" value="45" />
+          <span id="diffLabel" class="pill">보통</span>
+        </div>
+        <div class="row" style="gap:12px">
+          <span class="pill">AI 반응속도</span>
+          <div class="meter" style="width:min(42vw,260px)"><i id="aiMeter" style="width:45%"></i></div>
+        </div>
+      </div>
+      <footer>만든이: GPT‑5 Thinking · 순수 HTML5 Canvas (외부 라이브러리 없음)</footer>
+    </div>
+  </div>
+
+  <script>
+  ;(() => {
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // --- Audio (minimal beeps using WebAudio) ---
+    const audioCtx = typeof AudioContext !== 'undefined' ? new AudioContext() : null;
+    function beep(freq=600, dur=0.05, type='sine', gain=0.05){
+      if(!audioCtx) return;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type; o.frequency.value = freq; g.gain.value = gain;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); setTimeout(()=>{o.stop();}, dur*1000);
+    }
+
+    // --- Game Constants ---
+    const W = () => canvas.width;
+    const H = () => canvas.height;
+    const ASPECT = 960/560;
+
+    const PADDLE_W = 14;
+    const PADDLE_H = 96;
+    const BALL_R = 9;
+
+    const WIN_POINTS = 11;
+
+    // State
+    let state = 'menu'; // 'menu' | 'play' | 'paused' | 'over'
+    let tPrev = 0; // timestamp
+
+    const player = { x: 28, y: H()/2 - PADDLE_H/2, vy: 0, score: 0 };
+    const ai = { x: W()-28-PADDLE_W, y: H()/2 - PADDLE_H/2, vy: 0, score: 0, error: 0 };
+    const ball = { x: W()/2, y: H()/2, vx: 0, vy: 0, speed: 380, trail: [] };
+
+    let keys = new Set();
+    let mouseY = null; let touchId = null;
+
+    const settings = {
+      aiSkill: 0.45,     // 0..1 slider
+      aiMaxSpeed: 360,   // will adapt
+      aiLag: 0.10,       // reaction (s)
+      aiJitter: 8,       // random error (px)
+      spinFactor: 5.5,   // adds spin depending on hit offset
+      speedGain: 1.015,  // speed up per paddle hit
+      friction: 0.10,    // paddle smoothing
+    };
+
+    // Difficulty wiring
+    const diffEl = document.getElementById('difficulty');
+    const diffLabel = document.getElementById('diffLabel');
+    const aiMeter = document.getElementById('aiMeter');
+
+    function applyDifficulty(v){
+      // v: 0..100
+      const s = v/100; // 0..1
+      settings.aiSkill = 0.20 + s*0.75; // 0.2..0.95
+      settings.aiMaxSpeed = 280 + s*420; // 280..700
+      settings.aiLag = 0.22 - s*0.18; // 0.22..0.04s
+      settings.aiJitter = 12 - s*8;   // 12..4
+      diffLabel.textContent = s<0.25? '쉬움' : s<0.6? '보통' : s<0.85? '어려움' : '지옥불🔥';
+      aiMeter.style.width = (20 + s*70) + '%';
+    }
+    applyDifficulty(+diffEl.value);
+    diffEl.addEventListener('input', e=> applyDifficulty(+e.target.value));
+
+    // Resize (keep aspect, crisp)
+    function fit(){
+      const pad = 18;
+      const w = Math.min(window.innerWidth - pad*2, 960);
+      const h = Math.min(window.innerHeight - 210, 720);
+      let vw = w, vh = vw/ASPECT; if (vh>h){ vh = h; vw = vh*ASPECT; }
+      canvas.style.width = Math.round(vw)+'px';
+      canvas.style.height = Math.round(vh)+'px';
+    }
+    addEventListener('resize', fit); fit();
+
+    // Input
+    addEventListener('keydown', e=>{
+      if(e.code==='Space'){ e.preventDefault(); start(); return; }
+      if(e.code==='KeyP'){ togglePause(); return; }
+      if(e.code==='KeyR'){ reset(true); return; }
+      keys.add(e.code);
+      if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+    });
+    addEventListener('keyup', e=> keys.delete(e.code));
+    canvas.addEventListener('mousemove', e=>{
+      const rect = canvas.getBoundingClientRect();
+      const y = (e.clientY - rect.top) * (H()/rect.height);
+      mouseY = y;
+    });
+    canvas.addEventListener('mouseleave', ()=> mouseY=null);
+
+    canvas.addEventListener('touchstart', e=>{
+      const t = e.changedTouches[0]; touchId = t.identifier; handleTouch(t); e.preventDefault();
+    }, {passive:false});
+    canvas.addEventListener('touchmove', e=>{
+      const t = [...e.changedTouches].find(t=>t.identifier===touchId); if(t) handleTouch(t); e.preventDefault();
+    }, {passive:false});
+    canvas.addEventListener('touchend', ()=> touchId=null);
+
+    function handleTouch(t){
+      const rect = canvas.getBoundingClientRect();
+      const y = (t.clientY - rect.top) * (H()/rect.height);
+      mouseY = y;
+    }
+
+    // Buttons
+    document.getElementById('startBtn').onclick = start;
+    document.getElementById('pauseBtn').onclick = togglePause;
+    document.getElementById('resetBtn').onclick = ()=> reset(true);
+
+    function start(){ if(state==='menu' || state==='over' || state==='paused'){ if(state!=='play') serve(Math.random()<0.5?'player':'ai'); state='play'; } }
+    function togglePause(){ if(state==='play'){ state='paused'; } else if(state==='paused'){ state='play'; } }
+
+    function reset(full=false){
+      player.y = H()/2 - PADDLE_H/2; player.vy=0; player.score = full?0:player.score;
+      ai.y = H()/2 - PADDLE_H/2; ai.vy=0; ai.score = full?0:ai.score; ai.error=0;
+      ball.x = W()/2; ball.y = H()/2; ball.speed = 380; ball.vx=ball.vy=0; ball.trail.length=0;
+      state = full? 'menu' : 'play';
+    }
+
+    function serve(side){
+      ball.x = W()/2; ball.y = (0.3+Math.random()*0.4)*H(); ball.speed = 360 + Math.random()*60;
+      const angle = (Math.random()*0.5 - 0.25); // ~ ±14° vertical offset
+      const dir = side==='player'? 1 : -1;
+      ball.vx = dir * ball.speed * Math.cos(angle);
+      ball.vy = ball.speed * Math.sin(angle);
+      ball.trail.length=0;
+    }
+
+    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+    function rnd(n){ return (Math.random()*2-1)*n; }
+
+    // --- Physics & AI ---
+    function step(dt){
+      // Player control
+      const speed = 520;
+      let targetVy = 0;
+      if(keys.has('ArrowUp') || keys.has('KeyW')) targetVy -= speed;
+      if(keys.has('ArrowDown') || keys.has('KeyS')) targetVy += speed;
+      if(mouseY!=null){
+        const want = clamp(mouseY - (player.y+PADDLE_H/2), -speed, speed);
+        targetVy = want; // mouse overrides
+      }
+      player.vy += (targetVy - player.vy) * (0.20 + (mouseY!=null?0.25:0));
+      player.y += player.vy * dt;
+      player.y = clamp(player.y, 8, H()-PADDLE_H-8);
+
+      // Ball
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      // Walls
+      if(ball.y < BALL_R+6 && ball.vy<0){ ball.y = BALL_R+6; ball.vy *= -1; spawnSparks(ball.x, ball.y, 'top'); beep(700,0.03,'square',0.04); }
+      if(ball.y > H()-BALL_R-6 && ball.vy>0){ ball.y = H()-BALL_R-6; ball.vy *= -1; spawnSparks(ball.x, ball.y, 'bottom'); beep(650,0.03,'square',0.04); }
+
+      // Collisions with paddles
+      collidePaddle(player, +1);
+      collidePaddle(ai, -1);
+
+      // Score
+      if(ball.x < -40){ ai.score++; beep(300,0.06,'sine',0.06); scoreLogic(); }
+      if(ball.x > W()+40){ player.score++; beep(520,0.06,'sine',0.06); scoreLogic(); }
+
+      // AI control (predictive + lag + jitter + adaptive)
+      aiThink(dt);
+
+      // Trail for pretty
+      ball.trail.push({x:ball.x, y:ball.y});
+      if(ball.trail.length>24) ball.trail.shift();
+    }
+
+    function scoreLogic(){
+      // Simple adaptation: if AI is losing by >=3, increase its speed slightly; if winning by >=3, add error
+      const diff = ai.score - player.score;
+      if(diff <= -3){ settings.aiMaxSpeed = Math.min(settings.aiMaxSpeed*1.04, 900); settings.aiLag = Math.max(settings.aiLag*0.96, 0.035); }
+      if(diff >= 3){ settings.aiJitter = Math.min(settings.aiJitter+0.6, 16); }
+      // Check game over
+      if((player.score>=WIN_POINTS || ai.score>=WIN_POINTS) && Math.abs(player.score-ai.score)>=2){ state='over'; }
+      serve(diff>0? 'player' : 'ai');
+    }
+
+    function collidePaddle(p, dir){
+      const bx = ball.x + BALL_R*dir;
+      if(dir>0){ // left paddle
+        if(bx >= p.x && ball.x <= p.x + PADDLE_W && ball.y > p.y-1 && ball.y < p.y + PADDLE_H+1 && ball.vx<0){
+          onHit(p, dir);
+        }
+      } else { // right paddle
+        if(bx <= p.x + PADDLE_W && ball.x >= p.x && ball.y > p.y-1 && ball.y < p.y + PADDLE_H+1 && ball.vx>0){
+          onHit(p, dir);
+        }
+      }
+    }
+
+    function onHit(p, dir){
+      // dir: +1 for left paddle (player), -1 for right paddle (AI)
+      const rel = (ball.y - (p.y + PADDLE_H/2)) / (PADDLE_H/2); // -1..1 (top..bottom)
+      const spin = rel * settings.spinFactor * (0.8 + Math.random()*0.4);
+      const speedUp = 1 + (Math.abs(rel)*0.09) + (settings.speedGain-1);
+
+      // Snap ball to the paddle edge to avoid sticking/tunneling
+      const nx = dir>0 ? (p.x + PADDLE_W + BALL_R) : (p.x - BALL_R);
+      ball.x = nx;
+
+      // Reflect horizontally: left paddle -> +vx, right paddle -> -vx
+      const sign = dir>0 ? 1 : -1;
+      ball.vx = sign * Math.abs(ball.vx);
+
+      // Add spin and slight speedup
+      ball.vy += spin*24;
+      const v = Math.hypot(ball.vx, ball.vy) * speedUp;
+      const ang = Math.atan2(ball.vy, ball.vx);
+      ball.vx = Math.cos(ang)*v; ball.vy = Math.sin(ang)*v;
+
+      spawnSparks(ball.x, ball.y, 'paddle');
+      beep(dir>0? 840:880,0.03,'triangle',0.06);
+    }
+
+    function aiThink(dt){
+      // Predictive aim: estimate where ball will cross AI x considering reflections
+      const future = predictY(ball, ai.x + PADDLE_W/2, 3);
+      const targetY = future + rnd(settings.aiJitter) * (1-settings.aiSkill*0.6);
+      const center = ai.y + PADDLE_H/2;
+
+      // Lag (reaction)
+      const lag = settings.aiLag * (1.1 - settings.aiSkill*0.6);
+      const err = (targetY - center);
+      ai.error += (err - ai.error) * clamp(dt/Math.max(0.01, lag), 0, 1);
+
+      // Move with max speed
+      const desiredVy = clamp(ai.error, -settings.aiMaxSpeed, settings.aiMaxSpeed);
+      ai.vy += (desiredVy - ai.vy) * (0.18 + settings.aiSkill*0.1);
+      ai.y += ai.vy * dt * (0.96 + settings.aiSkill*0.12);
+      ai.y = clamp(ai.y, 8, H()-PADDLE_H-8);
+    }
+
+    function predictY(b, xCross, maxBounces=2){
+      // Time to reach xCross
+      if((b.vx<=0 && xCross<b.x) || (b.vx>=0 && xCross>b.x)){
+        const t = Math.abs((xCross - b.x)/b.vx);
+        let y = b.y + b.vy * t;
+        // reflect vertical bounds analytically
+        const top = BALL_R+6, bot = H()-BALL_R-6, h = bot-top;
+        if(y<top || y>bot){
+          // use modulo reflection
+          let m = (y - top) % (2*h); if(m<0) m += 2*h;
+          y = m <= h ? (top + m) : (bot - (m-h));
+        }
+        return y;
+      }
+      return H()/2; // fallback
+    }
+
+    // --- VFX ---
+    const sparks = [];
+    function spawnSparks(x,y,type){
+      const n = 10 + Math.floor(Math.random()*10);
+      for(let i=0;i<n;i++){
+        sparks.push({x,y, vx:rnd(240), vy:rnd(240), life:0.35+Math.random()*0.25, t:0, g:type==='paddle'?1:0});
+      }
+    }
+
+    function draw(){
+      // Court
+      ctx.clearRect(0,0,W(),H());
+      const grd = ctx.createLinearGradient(0,0,W(),H());
+      grd.addColorStop(0, 'rgba(112,247,198,.08)');
+      grd.addColorStop(1, 'rgba(122,162,255,.06)');
+      ctx.fillStyle = grd; ctx.fillRect(0,0,W(),H());
+
+      // Center dashed line
+      ctx.setLineDash([10,16]); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.25)';
+      ctx.beginPath(); ctx.moveTo(W()/2,16); ctx.lineTo(W()/2,H()-16); ctx.stroke(); ctx.setLineDash([]);
+
+      // Scores
+      ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '700 42px ui-sans-serif, system-ui, -apple-system, Segoe UI'; ctx.textAlign='center';
+      ctx.fillText(player.score, W()*0.25, 56);
+      ctx.fillText(ai.score, W()*0.75, 56);
+
+      // Paddles
+      drawPaddle(player.x, player.y);
+      drawPaddle(ai.x, ai.y);
+
+      // Ball trail
+      for(let i=0;i<ball.trail.length;i++){
+        const t = i/ball.trail.length; const r = BALL_R * (0.3 + 0.7*t);
+        ctx.globalAlpha = t*0.45; drawBall(ball.trail[i].x, ball.trail[i].y, r); ctx.globalAlpha = 1;
+      }
+      drawBall(ball.x, ball.y, BALL_R);
+
+      // Sparks
+      for(let i=sparks.length-1;i>=0;i--){
+        const s = sparks[i]; s.t += 1/60; s.x += s.vx*(1/60); s.y += s.vy*(1/60); s.vy += (s.g?40:0)*(1/60);
+        const a = 1 - s.t/s.life; if(a<=0){ sparks.splice(i,1); continue; }
+        ctx.globalAlpha = a*0.9; ctx.fillStyle = s.g? 'rgba(112,247,198,.9)' : 'rgba(122,162,255,.9)';
+        ctx.beginPath(); ctx.arc(s.x, s.y, 2.2, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+      }
+
+      // Messages
+      if(state==='menu') drawCenterMsg('AI Ping Pong', 'Space: 시작 · 난이도 슬라이더로 조절');
+      if(state==='paused') drawCenterMsg('일시정지', 'P: 재개 · R: 리셋');
+      if(state==='over') drawCenterMsg(`${player.score>ai.score? '승리! 🏆':'패배… 💀'}`, 'Space: 다시 시작 · R: 점수 리셋');
+    }
+
+    function drawPaddle(x,y){
+      const r=10; ctx.fillStyle='rgba(255,255,255,.92)';
+      roundRect(ctx,x,y,PADDLE_W,PADDLE_H,r,true,false);
+    }
+    function drawBall(x,y,r){
+      const g = ctx.createRadialGradient(x-2,y-2,1, x,y,r);
+      g.addColorStop(0,'#fff'); g.addColorStop(1,'rgba(255,255,255,.2)');
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+    function roundRect(ctx, x, y, w, h, r, fill, stroke){
+      if (typeof r === 'number') r = {tl:r,tr:r,br:r,bl:r};
+      ctx.beginPath(); ctx.moveTo(x + r.tl, y);
+      ctx.lineTo(x + w - r.tr, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+      ctx.lineTo(x + w, y + h - r.br); ctx.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+      ctx.lineTo(x + r.bl, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+      ctx.lineTo(x, y + r.tl); ctx.quadraticCurveTo(x, y, x + r.tl, y); if (fill) ctx.fill(); if (stroke) ctx.stroke();
+    }
+
+    function drawCenterMsg(title, sub){
+      ctx.save();
+      ctx.fillStyle='rgba(0,0,0,.35)'; roundRect(ctx, W()*0.5-220, H()*0.5-86, 440, 162, 16, true, false);
+      ctx.restore();
+      ctx.textAlign='center'; ctx.fillStyle='#fff';
+      ctx.font='800 36px ui-sans-serif, system-ui'; ctx.fillText(title, W()/2, H()/2-14);
+      ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font='600 16px ui-sans-serif, system-ui'; ctx.fillText(sub, W()/2, H()/2+22);
+    }
+
+    // --- Loop ---
+    function loop(ts){
+      const dt = Math.min(0.034, (ts - tPrev)/1000 || 0); tPrev = ts;
+      if(state==='play') step(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // Start muted on iOS until interaction
+    if(/iPad|iPhone|iPod/.test(navigator.userAgent)){
+      addEventListener('touchend', ()=>{ if(audioCtx && audioCtx.state==='suspended') audioCtx.resume(); }, {once:true});
+    }
+
+  })();
+  </script>
+</body>
+</html>
